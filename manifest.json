@@ -6,7 +6,6 @@
   "default_locale": "en",
   "permissions": [
     "tabs",
-    "tabGroups",
     "storage",
     "scripting"
   ],

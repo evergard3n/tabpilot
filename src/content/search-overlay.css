@@ -167,6 +167,26 @@
   color: #86868B;
 }
 
+.atm-badge-google {
+  background: rgba(0, 122, 255, 0.10);
+  color: #007AFF;
+}
+
+.atm-google-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #AEAEB2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.atm-google-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 .atm-highlight {
   background: rgba(0, 122, 255, 0.12);
   color: #007AFF;
@@ -269,6 +289,15 @@
     color: #98989D;
   }
 
+  .atm-badge-google {
+    background: rgba(10, 132, 255, 0.15);
+    color: #0A84FF;
+  }
+
+  .atm-google-icon {
+    color: #636366;
+  }
+
   .atm-highlight {
     background: rgba(10, 132, 255, 0.15);
     color: #0A84FF;
@@ -349,6 +378,15 @@
 :host([data-theme="dark"]) .atm-badge-history {
   background: #2C2C2E;
   color: #98989D;
+}
+
+:host([data-theme="dark"]) .atm-badge-google {
+  background: rgba(10, 132, 255, 0.15);
+  color: #0A84FF;
+}
+
+:host([data-theme="dark"]) .atm-google-icon {
+  color: #636366;
 }
 
 :host([data-theme="dark"]) .atm-highlight {

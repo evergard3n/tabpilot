@@ -1,6 +1,7 @@
 import cssText from './search-overlay.css?inline'
 
 interface SearchResultItem {
+  type: 'tab' | 'google'
   tab: {
     id?: number
     url: string
@@ -10,6 +11,7 @@ interface SearchResultItem {
   }
   score: number
   isOpen: boolean
+  suggestion?: string
 }
 
 // Guard against multiple injections
@@ -22,6 +24,7 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
   let selectedIndex = 0
   let results: SearchResultItem[] = []
   let debounceTimer: ReturnType<typeof setTimeout> | undefined
+  let currentSearchId = 0
 
   function init() {
     if (hostEl) return
@@ -53,11 +56,12 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     const input = document.createElement('input')
     input.className = 'atm-input'
     input.type = 'text'
-    input.placeholder = 'Search tabs...'
+    input.placeholder = 'Search tabs or the web...'
     input.addEventListener('input', () => {
       clearTimeout(debounceTimer)
       const query = input.value.trim()
       if (!query) {
+        currentSearchId++
         results = []
         renderResults(resultsList, query)
         return
@@ -132,6 +136,7 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     visible = false
     hostEl.style.display = 'none'
     clearTimeout(debounceTimer)
+    currentSearchId++
   }
 
   function toggle() {
@@ -142,19 +147,50 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     }
   }
 
+  async function fetchGoogleSuggest(query: string): Promise<string[]> {
+    const res = await chrome.runtime.sendMessage({
+      action: 'GET_GOOGLE_SUGGESTIONS',
+      payload: { query },
+    })
+    return Array.isArray(res) ? res : []
+  }
+
   async function doSearch(query: string, resultsList: HTMLDivElement) {
+    const id = ++currentSearchId
     try {
-      const res = await chrome.runtime.sendMessage({
-        action: 'SEARCH_TABS',
-        payload: { query },
-      })
-      if (Array.isArray(res)) {
-        results = res
-        selectedIndex = 0
-        renderResults(resultsList, query)
-      }
+      // Phase 1: render tab results immediately
+      const tabRes = await chrome.runtime.sendMessage({ action: 'SEARCH_TABS', payload: { query } })
+      if (id !== currentSearchId) return
+
+      const tabResults: SearchResultItem[] = Array.isArray(tabRes)
+        ? (tabRes as Omit<SearchResultItem, 'type'>[]).map((r) => ({ ...r, type: 'tab' as const }))
+        : []
+
+      results = tabResults
+      selectedIndex = 0
+      renderResults(resultsList, query)
+
     } catch (err) {
       console.error('[TabPilot] Search failed:', err)
+    }
+
+    try {
+      // Phase 2: append google suggestions when they arrive
+      const suggestions = await fetchGoogleSuggest(query)
+      if (id !== currentSearchId) return
+
+      const googleResults: SearchResultItem[] = suggestions.slice(0, 5).map((s) => ({
+        type: 'google' as const,
+        tab: { url: '', title: s },
+        score: 0,
+        isOpen: false,
+        suggestion: s,
+      }))
+
+      results = [...results.filter((r) => r.type === 'tab'), ...googleResults]
+      renderResults(resultsList, query)
+    } catch (err) {
+      console.error('[TabPilot] Google Suggest failed:', err)
     }
   }
 
@@ -164,7 +200,7 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     if (results.length === 0 && query) {
       const empty = document.createElement('div')
       empty.className = 'atm-empty'
-      empty.textContent = 'No matching tabs'
+      empty.textContent = 'No results — press Enter to search Google'
       resultsList.appendChild(empty)
       return
     }
@@ -178,7 +214,12 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
         updateSelection(resultsList)
       })
 
-      if (result.tab.favIconUrl) {
+      if (result.type === 'google') {
+        const icon = document.createElement('span')
+        icon.className = 'atm-google-icon'
+        icon.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>'
+        item.appendChild(icon)
+      } else if (result.tab.favIconUrl) {
         const favicon = document.createElement('img')
         favicon.className = 'atm-favicon'
         favicon.src = result.tab.favIconUrl
@@ -197,18 +238,23 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
       const title = document.createElement('div')
       title.className = 'atm-result-title'
       title.innerHTML = highlightText(result.tab.title || 'Untitled', query)
-
-      const url = document.createElement('div')
-      url.className = 'atm-result-url'
-      url.innerHTML = highlightText(formatUrl(result.tab.url), query)
-
       content.appendChild(title)
-      content.appendChild(url)
+
+      if (result.type !== 'google' && result.tab.url) {
+        const url = document.createElement('div')
+        url.className = 'atm-result-url'
+        url.innerHTML = highlightText(formatUrl(result.tab.url), query)
+        content.appendChild(url)
+      }
+
       item.appendChild(content)
 
       const badge = document.createElement('span')
       badge.className = 'atm-badge'
-      if (result.isOpen) {
+      if (result.type === 'google') {
+        badge.classList.add('atm-badge-google')
+        badge.textContent = 'GOOGLE'
+      } else if (result.isOpen) {
         badge.classList.add('atm-badge-open')
         badge.textContent = 'OPEN'
       } else {
@@ -235,7 +281,7 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     items[selectedIndex]?.scrollIntoView({ block: 'nearest' })
   }
 
-  function handleKeydown(e: KeyboardEvent, _input: HTMLInputElement, resultsList: HTMLDivElement) {
+  function handleKeydown(e: KeyboardEvent, input: HTMLInputElement, resultsList: HTMLDivElement) {
     e.stopPropagation()
 
     if (e.key === 'Escape') {
@@ -266,13 +312,21 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
       e.preventDefault()
       if (results[selectedIndex]) {
         activateResult(results[selectedIndex])
+      } else {
+        const query = input.value.trim()
+        if (query) openQueryOrUrl(query)
       }
       return
     }
   }
 
   function activateResult(result: SearchResultItem) {
-    if (result.isOpen && result.tab.id) {
+    if (result.type === 'google') {
+      chrome.runtime.sendMessage({
+        action: 'OPEN_URL',
+        payload: { url: `https://www.google.com/search?q=${encodeURIComponent(result.suggestion ?? result.tab.title)}` },
+      })
+    } else if (result.isOpen && result.tab.id) {
       chrome.runtime.sendMessage({
         action: 'SWITCH_TAB',
         payload: { tabId: result.tab.id },
@@ -283,6 +337,15 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
         payload: { url: result.tab.url },
       })
     }
+    hide()
+  }
+
+  function openQueryOrUrl(query: string) {
+    const isUrl = /^(https?:\/\/)/.test(query) || /^[\w-]+\.[\w]{2,}(\/|$)/.test(query)
+    const url = isUrl
+      ? query.startsWith('http') ? query : `https://${query}`
+      : `https://www.google.com/search?q=${encodeURIComponent(query)}`
+    chrome.runtime.sendMessage({ action: 'OPEN_URL', payload: { url } })
     hide()
   }
 
