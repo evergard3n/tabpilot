@@ -1,7 +1,7 @@
 import { searchTabs } from './searcher'
 import { recordTabVisit, getHistoryEntries } from './storage'
 import { STORAGE_KEYS, DEFAULT_SETTINGS } from '../shared/constants'
-import type { ExtensionMessage, TabInfo, ExtensionSettings } from '../shared/types'
+import type { ExtensionMessage, TabInfo, TabHistoryEntry, ExtensionSettings } from '../shared/types'
 
 console.log('[TabPilot] Service worker started')
 
@@ -105,9 +105,15 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       const payload = message.payload as { query: string; windowId?: number } | undefined
       const query = payload?.query ?? ''
       const windowId = payload?.windowId
-      const tabs = await (windowId !== undefined
-        ? chrome.tabs.query({ windowId })
-        : chrome.tabs.query({ currentWindow: true }))
+
+      const [tabs, internalHistory, browserHistory] = await Promise.all([
+        windowId !== undefined
+          ? chrome.tabs.query({ windowId })
+          : chrome.tabs.query({ currentWindow: true }),
+        getHistoryEntries(),
+        chrome.history.search({ text: query, maxResults: 100, startTime: 0 }),
+      ])
+
       const openTabs: TabInfo[] = tabs
         .filter((t) => t.id !== undefined)
         .map((t) => ({
@@ -120,8 +126,24 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
           active: t.active,
           pinned: t.pinned,
         }))
-      const history = await getHistoryEntries()
-      return searchTabs(query, openTabs, history)
+
+      const browserEntries: TabHistoryEntry[] = browserHistory
+        .filter((h) => h.url)
+        .map((h) => ({
+          url: h.url!,
+          title: h.title || h.url!,
+          lastAccessed: h.lastVisitTime ?? Date.now(),
+          visitCount: h.visitCount ?? 1,
+          closed: true,
+        }))
+
+      const internalUrls = new Set(internalHistory.map((e) => e.url))
+      const merged: TabHistoryEntry[] = [
+        ...internalHistory,
+        ...browserEntries.filter((e) => !internalUrls.has(e.url)),
+      ]
+
+      return searchTabs(query, openTabs, merged)
     }
 
     case 'GET_GOOGLE_SUGGESTIONS': {

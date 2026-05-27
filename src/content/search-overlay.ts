@@ -41,6 +41,8 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
     const backdrop = document.createElement('div')
     backdrop.className = 'atm-backdrop'
     backdrop.addEventListener('click', hide)
+    backdrop.addEventListener('wheel', (e) => e.stopPropagation(), { passive: false })
+    backdrop.addEventListener('touchmove', (e) => e.stopPropagation(), { passive: false })
 
     const container = document.createElement('div')
     container.className = 'atm-container'
@@ -84,6 +86,15 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
 
     const resultsList = document.createElement('div')
     resultsList.className = 'atm-results'
+    resultsList.addEventListener('wheel', (e) => {
+      const { scrollTop, scrollHeight, clientHeight } = resultsList
+      const atTop = scrollTop === 0
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1
+      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+        e.preventDefault()
+      }
+      e.stopPropagation()
+    }, { passive: false })
 
     const footer = document.createElement('div')
     footer.className = 'atm-footer'
@@ -166,7 +177,10 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
         ? (tabRes as Omit<SearchResultItem, 'type'>[]).map((r) => ({ ...r, type: 'tab' as const }))
         : []
 
-      results = tabResults
+      const openTabs = tabResults.filter((r) => r.isOpen)
+      const historyTabs = tabResults.filter((r) => !r.isOpen).slice(0, 5)
+
+      results = [...openTabs, ...historyTabs]
       selectedIndex = 0
       renderResults(resultsList, query)
 
@@ -211,7 +225,9 @@ if (!(window as unknown as Record<string, boolean>).__ATM_SEARCH_LOADED__) {
       item.addEventListener('click', () => activateResult(result))
       item.addEventListener('mouseenter', () => {
         selectedIndex = index
-        updateSelection(resultsList)
+        resultsList.querySelectorAll('.atm-result-item').forEach((el, i) => {
+          el.classList.toggle('atm-selected', i === selectedIndex)
+        })
       })
 
       if (result.type === 'google') {
