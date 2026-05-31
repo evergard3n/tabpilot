@@ -106,13 +106,14 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       const query = payload?.query ?? ''
       const windowId = payload?.windowId
 
-      const [tabs, internalHistory, browserHistory] = await Promise.all([
-        windowId !== undefined
-          ? chrome.tabs.query({ windowId })
-          : chrome.tabs.query({ currentWindow: true }),
-        getHistoryEntries(),
-        chrome.history.search({ text: query, maxResults: 100, startTime: 0 }),
-      ])
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+    const [tabs, internalHistory, browserHistory] = await Promise.all([
+      windowId !== undefined
+        ? chrome.tabs.query({ windowId })
+        : chrome.tabs.query({ currentWindow: true }),
+      getHistoryEntries(),
+      chrome.history.search({ text: '', maxResults: 500, startTime: Date.now() - THIRTY_DAYS_MS }),
+    ])
 
       const openTabs: TabInfo[] = tabs
         .filter((t) => t.id !== undefined)
